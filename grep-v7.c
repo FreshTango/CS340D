@@ -1,3 +1,7 @@
+/* Assignment 10
+   Khiem Tang 
+*/
+
 /* UNIX V7 source code: see /COPYRIGHT or www.tuhs.org for details. */
 
 /*
@@ -66,6 +70,7 @@ int advance(register char *lp, register char *ep);
 int succeed(char *f);
 int ecmp(char *a, char *b, int count);
 int errexit(char *s, char *f);
+void printexp();
 
 int main (int argc, char **argv)
 {
@@ -140,6 +145,8 @@ out:
 		*argv = ybuf;
 	}
 	compile(*argv);
+	//printexp();
+	/* Part of original code omitted to call routine. */
 	nfile = --argc;
 	if (argc<=0) {
 		if (lflag)
@@ -150,6 +157,7 @@ out:
 		execute(*argv);
 	}
 	exit(nsucc == 0);
+
 }
 
 int compile(char *astr)
@@ -376,6 +384,7 @@ int advance(register char *lp, register char *ep)
 		if (braelist[*ep]==0)
 			return(0);
 		ct = braelist[*ep++] - bbeg;
+
 		if(ecmp(bbeg, lp, ct)) {
 			lp += ct;
 			continue;
@@ -388,6 +397,8 @@ int advance(register char *lp, register char *ep)
 			return(0);
 		ct = braelist[*ep++] - bbeg;
 		curlp = lp;
+		if (ct == 0)
+			continue;
 		while(ecmp(bbeg, lp, ct))
 			lp += ct;
 		while(lp >= curlp) {
@@ -479,4 +490,55 @@ int errexit(char *s, char *f)
 {
 	fprintf(stderr, s, f);
 	exit(2);
+}
+
+/* Routine to print "compiled" expression */
+void printexp()
+{
+	for (int i = 0; i < ESIZE; i++) {
+		if (expbuf[i] == CBRA) {
+			printf("CBRA:\t%d\n", expbuf[++i]);
+		}
+		else if (expbuf[i] == CCHR) {
+			printf("CCHR: %c\n", expbuf[++i]);
+		}
+		else if (expbuf[i] == CDOT) {
+			printf("CDOT\n");
+		}
+		else if (expbuf[i] == CCL) {
+			i += 16;
+			printf("CCL:");
+			// Advances 16 on expbuf and prints the corresponding bytes.
+			for (int x = 1; x <= 16; x++)
+				printf(" %02x", expbuf[i-x]);
+			printf("\n");
+		}
+		else if (expbuf[i] == CDOL) {
+			printf("CDOL");
+		}
+		else if (expbuf[i] == CKET) {
+			printf("CKET:\t%d\n", expbuf[++i]);
+		}
+		else if (expbuf[i] == CBACK) {
+			printf("CBACK: %d\n", expbuf[++i]);
+		} else {
+			// Used for any special character that follows a character.
+			if (expbuf[i] == (CCHR + 1)) {
+				// characters: a*
+				printf("CCHR: %c\nSTAR\n", expbuf[++i]);
+			} else if (expbuf[i] == (CDOT + 1)) {
+				// Any asterisk that follows a period.
+				printf("CDOT\nSTAR\n");
+			} else if (expbuf[i] == (CCL + 1)) {
+				// Any asterisk that follows a bracket (range). 
+				printf("CCL:");
+				i += 16;
+				for (int x = 0; x < 16; x++)
+					printf(" %02x", expbuf[i-x]);
+				printf("\nSTAR\n");
+			} else if (expbuf[i] == (CBACK + 1)) {
+				printf("CBACK: %d\nSTAR\n", expbuf[++i]);
+			}
+		}
+	}
 }

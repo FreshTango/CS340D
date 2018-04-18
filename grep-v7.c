@@ -1,4 +1,4 @@
-/* Assignment 10
+/* Lab 3
    Khiem Tang 
 */
 
@@ -13,46 +13,58 @@
  *		2 - some error
  */
 
+/* Changes for ANSI C Conformance:
+
+- Adjusted layout of arguments on subroutine headers.
+- Added stdlib.h library
+- Added implicit declarations of subroutines above main function.
+- Added specificity to 'register' type variables for compatibility.
+- Added return values to certain cases.
+- Adjusted printf formatting for compatibility.
+- Changed macro BSIZE to DEV_BSIZE.
+
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <sys/param.h>
 
-#define	CBRA	1
-#define	CCHR	2
-#define	CDOT	4
-#define	CCL	    6
-#define	NCCL	8
-#define	CDOL	10
-#define	CEOF	11
-#define	CKET	12
-#define	CBACK	18
+#define	CBRA	1 // Denotes the beginning of a group in the expression. (e.g.: "\(abc\)")
+#define	CCHR	2 // Designated for a character.
+#define	CDOT	4 // Designated for a period.
+#define	CCL	    6 // Denotes ranges. (e.g.: [A-Z])
+#define	NCCL	8 // This constant does not seem to be used.
+#define	CDOL	10 // Denotes the matching of an expression at the end of a line. (e.g.: "abc$")
+#define	CEOF	11 // Denotes the end of the pattern expression.
+#define	CKET	12 // Denotes the closure or end of a group.
+#define	CBACK	18 // Denotes a backreference.
 
-#define	STAR	01
+#define	STAR	01 // Denotes the asterisk special character (e.g.: "abc*").
 
-#define	LBSIZE	512
-#define	ESIZE	256
-#define	NBRA	9
+#define	LBSIZE	512 // Defines the maximum size of the buffer for the file line.
+#define	ESIZE	256 // Defines the maximum size of the buffer for the pattern.
+#define	NBRA	9 // Denotes the maximum amount of groups possible.
 
-char	expbuf[ESIZE];
-long	lnum;
-char	linebuf[LBSIZE+1];
-char	ybuf[ESIZE];
-int	bflag;
-int	lflag;
-int	nflag;
-int	cflag;
-int	vflag;
-int	nfile;
-int	hflag	= 1;
-int	sflag;
-int	yflag;
-int	circf;
-long	tln;
-int	nsucc;
-char	*braslist[NBRA];
-char	*braelist[NBRA];
-char	bittab[] = {
+char	expbuf[ESIZE]; // Defines the compiled or processed version of the pattern.
+long	lnum; // Defines the current line number of the file. 
+char	linebuf[LBSIZE+1]; // Defines the buffer for the line of the file.
+char	ybuf[ESIZE]; // Defines the "case-insensitive" buffer.
+int	bflag; // Status of b flag: Print the offset of the line containing the match.
+int	lflag; // Status of l flag: When match is found, print the name of the input file.
+int	nflag; // Status of n flag: Prefix each line of output with corresponding line number.
+int	cflag; // Status of c flag: Prints the count of matching lines.
+int	vflag; // Status of v flag: Selects non-matching lines.
+int	nfile; // Defines the number of files. 
+int	hflag	= 1; // Status of h flag: Suppress the prefixing of file names on output. (e.g. file.txt: <data>)
+int	sflag; // Status of s flag: Suppress error messages about nonexistent/unreadable files.
+int	yflag; // Status of y flag: "Case-insensitive" (e.g.: a => [aA]; A => A)
+int	circf; // Denotes whether there is a caret (^) at the beginning of the pattern.
+long	tln; // Denotes the number of matching lines given the inputted pattern, with the c flag.
+int	nsucc; // Determines whether or not a match is found. Set to 0 if match, 1 if no match.
+char	*braslist[NBRA]; // Denotes the pointers for the beginning of groups. Used for backreferences.
+char	*braelist[NBRA]; // Denotes the pointers for the end of groups. Used for backreferences.
+char	bittab[] = { // A bit table defined to mask the last three bits of the expression for use in comparison.
 	1,
 	2,
 	4,
@@ -63,6 +75,7 @@ char	bittab[] = {
 	128
 };
 
+// Implicit declaration calls of subroutines.
 int compile(char *astr);
 int errexit(char *s, char *f);
 int execute(char *file);
@@ -70,10 +83,12 @@ int advance(register char *lp, register char *ep);
 int succeed(char *f);
 int ecmp(char *a, char *b, int count);
 int errexit(char *s, char *f);
-void printexp();
 
+/* Main: Reads the input given from the grep call and parses it.
+	Iterates through argc & argv, marks which flags are set. */
 int main (int argc, char **argv)
 {
+	// Reads in the arguments from the command line and determines set flags.
 	while (--argc > 0 && (++argv)[0][0]=='-')
 		switch (argv[0][1]) {
 
@@ -145,8 +160,6 @@ out:
 		*argv = ybuf;
 	}
 	compile(*argv);
-	//printexp();
-	/* Part of original code omitted to call routine. */
 	nfile = --argc;
 	if (argc<=0) {
 		if (lflag)
@@ -157,9 +170,19 @@ out:
 		execute(*argv);
 	}
 	exit(nsucc == 0);
-
 }
 
+/* Compile: Checks the syntax of the given pattern, throwing
+an errexit call if the syntax is incorrect. Once the syntax is deemed
+valid, the expression is parsed and converted into a readable format
+for grep, particularly useful for the execute function.
+[Input]: Pattern expression (e.g. "dddd")
+[Output]: 
+ 2  64  2  64  2  64  2  64  b  0 
+ 0  0  0  0  0  ...
+[Explanation]:
+The first 2 in the table represents a character type
+(denoted by the CCHR macro), followed by 64 in hex (d in ascii). */
 int compile(char *astr)
 {
 	register int c;
@@ -276,6 +299,12 @@ int compile(char *astr)
 	errexit("grep: RE error\n", (char *)NULL);
 }
 
+/* Execute: Takes the converted expression from compile and interprets
+it to find applicable matches in the inputted file. The function will open
+a file and begin to iterate through it line by line and compare it to the 
+converted expression (linebuf & expbuf) attempting to detect matches. 
+[Input]: Given file
+[Output]: Match is printed */
 int execute(char *file)
 {
 	register char *p1, *p2;
@@ -337,6 +366,12 @@ int execute(char *file)
 	}
 }
 
+/* Advance: Takes in the line and expression buffer and compares the two,
+at last outputting whether there is a match or not. Returns 1 if match
+or 0 if there is not a match. This function is called recursively whenever
+there is a character followed by an asterisk (CCHR | STAR).
+[Input]: Line and expression buffers (linebuf & expbuf)
+[Output]: Returns 1 if match, 0 if not a match. */
 int advance(register char *lp, register char *ep)
 {
 	register char *curlp;
@@ -454,6 +489,11 @@ int advance(register char *lp, register char *ep)
 	}
 }
 
+/* Succeed: Takes in a file and prints out the matches of the given line.
+[Input]: Given file
+[Output]: Returns matches of the given line based on the expression. If the c flag
+is set, the succeed function simply increments the long tln (count for matches) and
+returns. Ultimately, different flags set alters the routine's final output. */
 int succeed(char *f)
 {
 	long ftell();
@@ -478,6 +518,12 @@ int succeed(char *f)
 	printf("%s\n", linebuf);
 }
 
+/* Ecmp: Takes in two pointers to a string and a count. If the first number of characters,
+defined by count, are equal, then the function returns 1. Else, the function returns 0.
+The function itself is used only within backreferencing situations, and called during the execution
+of the advance subroutine (which determines if there is a match).
+[Input]: Two poiners to groups and a count integer.
+[Output]: Return 0 or 1. */
 int ecmp(char *a, char *b, int count)
 {
 	register int cc = count;
@@ -486,59 +532,11 @@ int ecmp(char *a, char *b, int count)
 	return(1);
 }
 
+/* Errexit: General error function, which prints out an error message and exits the program.
+[Input]: Error string and corresponding file.
+[Output]: Error message and exit system call. */
 int errexit(char *s, char *f)
 {
 	fprintf(stderr, s, f);
 	exit(2);
-}
-
-/* Routine to print "compiled" expression */
-void printexp()
-{
-	for (int i = 0; i < ESIZE; i++) {
-		if (expbuf[i] == CBRA) {
-			printf("CBRA:\t%d\n", expbuf[++i]);
-		}
-		else if (expbuf[i] == CCHR) {
-			printf("CCHR: %c\n", expbuf[++i]);
-		}
-		else if (expbuf[i] == CDOT) {
-			printf("CDOT\n");
-		}
-		else if (expbuf[i] == CCL) {
-			i += 16;
-			printf("CCL:");
-			// Advances 16 on expbuf and prints the corresponding bytes.
-			for (int x = 1; x <= 16; x++)
-				printf(" %02x", expbuf[i-x]);
-			printf("\n");
-		}
-		else if (expbuf[i] == CDOL) {
-			printf("CDOL");
-		}
-		else if (expbuf[i] == CKET) {
-			printf("CKET:\t%d\n", expbuf[++i]);
-		}
-		else if (expbuf[i] == CBACK) {
-			printf("CBACK: %d\n", expbuf[++i]);
-		} else {
-			// Used for any special character that follows a character.
-			if (expbuf[i] == (CCHR + 1)) {
-				// characters: a*
-				printf("CCHR: %c\nSTAR\n", expbuf[++i]);
-			} else if (expbuf[i] == (CDOT + 1)) {
-				// Any asterisk that follows a period.
-				printf("CDOT\nSTAR\n");
-			} else if (expbuf[i] == (CCL + 1)) {
-				// Any asterisk that follows a bracket (range). 
-				printf("CCL:");
-				i += 16;
-				for (int x = 0; x < 16; x++)
-					printf(" %02x", expbuf[i-x]);
-				printf("\nSTAR\n");
-			} else if (expbuf[i] == (CBACK + 1)) {
-				printf("CBACK: %d\nSTAR\n", expbuf[++i]);
-			}
-		}
-	}
 }

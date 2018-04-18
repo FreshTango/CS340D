@@ -43,13 +43,16 @@
 #define	STAR	01 // Denotes the asterisk special character (e.g.: "abc*").
 
 #define	LBSIZE	512 // Defines the maximum size of the buffer for the file line.
-#define	ESIZE	256 // Defines the maximum size of the buffer for the pattern.
+#define	ESIZE	8192 // Defines the maximum size of the buffer for the pattern.
 #define	NBRA	9 // Denotes the maximum amount of groups possible.
 
 char	expbuf[ESIZE]; // Defines the compiled or processed version of the pattern.
 long	lnum; // Defines the current line number of the file. 
 char	linebuf[LBSIZE+1]; // Defines the buffer for the line of the file.
 char	ybuf[ESIZE]; // Defines the "case-insensitive" buffer.
+char    ibuf[ESIZE]; // Defines the "case-insensitive" buffer for i flag.
+int iflag; // Status of i flag: "Case-insensitive" like y flag but more robust (considers characters in sets).
+int kflag; // Status of k flag: Writes the raw & compiled expression to a file (Extra credit)
 int	bflag; // Status of b flag: Print the offset of the line containing the match.
 int	lflag; // Status of l flag: When match is found, print the name of the input file.
 int	nflag; // Status of n flag: Prefix each line of output with corresponding line number.
@@ -89,54 +92,115 @@ int errexit(char *s, char *f);
 int main (int argc, char **argv)
 {
 	// Reads in the arguments from the command line and determines set flags.
-	while (--argc > 0 && (++argv)[0][0]=='-')
+	while (--argc > 0 && (++argv)[0][0]=='-'){
 		switch (argv[0][1]) {
+			// Added case of i flag (extra credit)
+			case 'i':
+				iflag++;
+				continue;
 
-		case 'y':
-			yflag++;
-			continue;
+			// Added casse of k flag (extra credit)
+			case 'k':
+				kflag++;
+				continue;
 
-		case 'h':
-			hflag = 0;
-			continue;
+			case 'y':
+				yflag++;
+				continue;
 
-		case 's':
-			sflag++;
-			continue;
+			case 'h':
+				hflag = 0;
+				continue;
 
-		case 'v':
-			vflag++;
-			continue;
+			case 's':
+				sflag++;
+				continue;
 
-		case 'b':
-			bflag++;
-			continue;
+			case 'v':
+				vflag++;
+				continue;
 
-		case 'l':
-			lflag++;
-			continue;
+			case 'b':
+				bflag++;
+				continue;
 
-		case 'c':
-			cflag++;
-			continue;
+			case 'l':
+				lflag++;
+				continue;
 
-		case 'n':
-			nflag++;
-			continue;
+			case 'c':
+				cflag++;
+				continue;
 
-		case 'e':
-			--argc;
-			++argv;
-			goto out;
+			case 'n':
+				nflag++;
+				continue;
 
-		default:
-			errexit("grep: unknown flag\n", (char *)NULL);
-			continue;
+			case 'e':
+				--argc;
+				++argv;
+				goto out;
+
+			default:
+				errexit("grep: unknown flag\n", (char *)NULL);
+				continue;
 		}
-out:
+	}
+	out:
 	if (argc<=0)
 		exit(2);
-	if (yflag) {
+	// If k flag, write the raw expression to a unique file.
+	if(kflag){
+	char template[] = "regexRaw_XXXXXX";
+		int fd = mkstemp(template);
+		FILE *fp = fdopen(fd, "w");
+		fprintf(fp, "%s\n", *argv);
+		fprintf(stderr, "Regex (Raw): %s\n", template);
+	}
+	/* -i flag: Adds a more robust form of case insensitivity.
+	Unlike -y flag, it considers the case of characters within sets, and also
+	looks to consider lower case for characters that are upper case.
+	[Example]: a[b]C -> [aA][bB][Cc] */
+	if(iflag){
+		register char *p, *s;
+		for (s = ibuf, p = *argv; *p; ) {
+			if (*p == '\\') {
+				*s++ = *p++;
+				if (*p)
+					*s++ = *p++;
+				// Inside of a set.
+			} else if (*p == '[') {
+				while (*p != '\0' && *p != ']'){
+					if(islower(*p)){
+						*s++ = toupper(*p);
+						*s++ = *p++;
+					}else if(isupper(*p)){
+						*s++ = tolower(*p);
+						*s++ = *p++;
+					}else{
+						*s++ = *p++;
+					}
+				}
+				// If character is upper case.
+			} else if(isupper(*p)){
+				*s++ = '[';
+				*s++ = tolower(*p);
+				*s++ = *p++;
+				*s++ = ']';
+				// If character is lower case.
+			} else if (islower(*p)) {
+				*s++ = '[';
+				*s++ = toupper(*p);
+				*s++ = *p++;
+				*s++ = ']';
+			} else
+				*s++ = *p++;
+			if (s >= ibuf+ESIZE-5)
+				errexit("grep: argument too long\n", (char *)NULL);
+		}
+		*s = '\0';
+		*argv = ibuf;
+	} else if (yflag) {
 		register char *p, *s;
 		for (s = ybuf, p = *argv; *p; ) {
 			if (*p == '\\') {
@@ -160,6 +224,14 @@ out:
 		*argv = ybuf;
 	}
 	compile(*argv);
+	// If k flag, write the compiled expression to a unique file.
+	if(kflag){
+		char template[] = "regexCompiled_XXXXXX";
+		int fd = mkstemp(template);
+		FILE *fp = fdopen(fd, "w");
+		fprintf(fp, "%s\n", expbuf);
+		fprintf(stderr, "Regex (Compiled): %s\n", template);
+	}
 	nfile = --argc;
 	if (argc<=0) {
 		if (lflag)
@@ -185,7 +257,7 @@ The first 2 in the table represents a character type
 (denoted by the CCHR macro), followed by 64 in hex (d in ascii). */
 int compile(char *astr)
 {
-	register int c;
+	register char c;
 	register char *ep, *sp;
 	char *cstart;
 	char *lastep;
@@ -194,6 +266,7 @@ int compile(char *astr)
 	int closed;
 	char numbra;
 	char neg;
+	int pflag = 0;
 
 	ep = expbuf;
 	sp = astr;
@@ -207,8 +280,14 @@ int compile(char *astr)
 	for (;;) {
 		if (ep >= &expbuf[ESIZE])
 			goto cerror;
-		if ((c = *sp++) != '*')
+		c = *sp++;
+		// If plus not encountered, disable flag.
+		if ((c != '*') && (c != '+')){
 			lastep = ep;
+			pflag = 0;
+		}
+		if(c == '+' && pflag)
+			continue;
 		switch (c) {
 
 		case '\0':
@@ -217,6 +296,28 @@ int compile(char *astr)
 
 		case '.':
 			*ep++ = CDOT;
+			continue;
+
+		/* In case with '+', set pflag to prevent redundant calls in memory.
+		Creates compiled expression accordingly. */
+		case '+':
+			if(lastep==0)
+				goto defchar;
+			pflag = 1;
+			if(*lastep==CCL){
+				*ep++ = CCL | STAR;
+				char *tmp = lastep;
+				for(int i = 0; i < 16; i++)
+					*ep++ = *(++tmp);
+				continue;
+			}
+			if(*lastep==CDOT){
+				*ep++ = CDOT | STAR;
+				continue;
+			}
+			*ep++ = CCHR | STAR;
+			char *tmp = lastep;
+			*ep++ = *(++tmp);
 			continue;
 
 		case '*':
@@ -432,6 +533,7 @@ int advance(register char *lp, register char *ep)
 			return(0);
 		ct = braelist[*ep++] - bbeg;
 		curlp = lp;
+		// Added to prevent infinite recursion in certain expressions.
 		if (ct == 0)
 			continue;
 		while(ecmp(bbeg, lp, ct))
